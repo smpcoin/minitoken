@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniBTC 权限管理面板（白名单/黑名单）</title>
+    <!-- Bootstrap 样式 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Ethers.js -->
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <style>
+        /* 通用样式（与原有面板保持一致） */
+        body {
+            background-color: #f5f7fa;
+            padding-bottom: 50px;
+        }
+        .container {
+            max-width: 1200px;
+        }
+        .header-bar {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            margin-bottom: 30px;
+        }
+        .contract-card {
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            padding: 25px;
+            margin-bottom: 30px;
+        }
+        .contract-card h4 {
+            color: #2c3e50;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-label {
+            font-weight: 600;
+            color: #34495e;
+        }
+        .btn-custom {
+            background-color: #3498db;
+            color: #fff;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 5px;
+            transition: all 0.3s;
+        }
+        .btn-custom:hover {
+            background-color: #2980b9;
+            color: #fff;
+        }
+        .btn-custom:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        .btn-read {
+            background-color: #2ecc71;
+            color: #fff;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            margin-left: 10px;
+            transition: all 0.3s;
+        }
+        .btn-read:hover {
+            background-color: #27ae60;
+            color: #fff;
+        }
+        .btn-unlock {
+            font-size: 0.8em;
+            color: #999;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+        .btn-unlock:hover {
+            color: #3498db;
+        }
+        /* 状态提示 */
+        .status {
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 5px;
+            display: none;
+        }
+        .status.loading {
+            display: block;
+            background-color: #f8f9fa;
+            color: #0d6efd;
+        }
+        .status.success {
+            display: block;
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            display: block;
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        /* 折叠面板 */
+        .collapse-btn {
+            background: none;
+            border: none;
+            color: #3498db;
+            font-size: 0.9em;
+            cursor: pointer;
+        }
+        .collapse-content {
+            margin-top: 15px;
+        }
+        /* 地址/数值校验 */
+        .is-invalid {
+            border-color: #dc3545 !important;
+        }
+        .invalid-feedback {
+            display: block;
+            color: #dc3545;
+            font-size: 0.85em;
+            margin-top: 5px;
+        }
+        /* 只读样式 */
+        .addr-input[readonly], .form-control[readonly] {
+            background-color: #f8f9fa;
+            cursor: not-allowed;
+        }
+        /* 开关样式优化 */
+        .form-switch {
+            padding-left: 2.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <!-- 头部：钱包连接 + 合约地址配置 -->
+        <div class="header-bar">
+            <div class="row align-items-center">
+                <div class="col-md-4 mb-3 mb-md-0">
+                    <h3>MiniBTC 权限管理面板</h3>
+                </div>
+                <div class="col-md-8">
+                    <!-- 钱包连接 -->
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <button id="connectWallet" class="btn-custom w-100">连接钱包</button>
+                            <div id="walletStatus" class="mt-2 text-muted">未连接钱包</div>
+                        </div>
+                        <div class="col-md-6">
+                            <select id="chainSelector" class="form-control">
+                                <option value="56">BSC 主网 (56)</option>
+                                <option value="97">BSC 测试网 (97)</option>
+                                <option value="1">以太坊主网 (1)</option>
+                                <option value="5">以太坊测试网 Goerli (5)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- MiniBTC 合约地址配置（固定为你的合约地址） -->
+                    <div class="row">
+                        <div class="col-md-8 mb-2">
+                            <label class="form-label">MiniBTC 合约地址
+                                <span class="btn-unlock" onclick="unlockInput('miniBtcAddr')">🔓 解锁</span>
+                            </label>
+                            <input type="text" id="miniBtcAddr" class="form-control addr-input" 
+                                value="0x0F3BA1d1571511DE2295866E91ea4a6C152A7999" readonly placeholder="0x...">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MiniBTC 核心权限管理 -->
+        <div class="contract-card">
+            <div class="d-flex justify-content-between align-items-center">
+                <h4>核心权限配置</h4>
+                <button class="collapse-btn" onclick="toggleCollapse('corePermissionCollapse')">收起 ▲</button>
+            </div>
+            <div id="corePermissionCollapse" class="collapse-content">
+                <!-- 1. 买币白名单管理 -->
+                <div class="row mb-4 border-bottom pb-3">
+                    <div class="col-12">
+                        <h6>1. 买币白名单管理</h6>
+                        <div class="row align-items-end">
+                            <div class="col-md-5">
+                                <input type="text" id="buyWhitelistAddr" class="form-control" placeholder="需要配置的地址">
+                            </div>
+                            <div class="col-md-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="buyWhitelistStatus" checked>
+                                    <label class="form-check-label" for="buyWhitelistStatus">加入白名单（取消则移除）</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <button onclick="callMiniBtcFunction('setBuyWhitelist')" class="btn-custom w-100">执行</button>
+                            </div>
+                            <div class="col-md-2">
+                                <button onclick="readMiniBtcConfig('buyWhitelist')" class="btn-read w-100">读取状态</button>
+                            </div>
+                        </div>
+                        <div id="buyWhitelistStatusMsg" class="status"></div>
+                    </div>
+                </div>
+
+                <!-- 2. 受信任合约管理 -->
+                <div class="row mb-4 border-bottom pb-3">
+                    <div class="col-12">
+                        <h6>2. 受信任合约管理（豁免Anti-snipe检查）</h6>
+                        <div class="row align-items-end">
+                            <div class="col-md-5">
+                                <input type="text" id="trustedContractAddr" class="form-control" placeholder="需要配置的合约地址">
+                            </div>
+                            <div class="col-md-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="trustedContractStatus" checked>
+                                    <label class="form-check-label" for="trustedContractStatus">设为受信任（取消则移除）</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <button onclick="callMiniBtcFunction('setTrustedContract')" class="btn-custom w-100">执行</button>
+                            </div>
+                            <div class="col-md-2">
+                                <button onclick="readMiniBtcConfig('trustedContract')" class="btn-read w-100">读取状态</button>
+                            </div>
+                        </div>
+                        <div id="trustedContractStatusMsg" class="status"></div>
+                    </div>
+                </div>
+
+                <!-- 3. 黑名单管理 -->
+                <div class="row mb-4 border-bottom pb-3">
+                    <div class="col-12">
+                        <h6>3. 黑名单管理（禁止交易/转账）</h6>
+                        <div class="row align-items-end">
+                            <div class="col-md-5">
+                                <input type="text" id="blacklistAddr" class="form-control" placeholder="需要配置的地址">
+                            </div>
+                            <div class="col-md-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="blacklistStatus">
+                                    <label class="form-check-label" for="blacklistStatus">加入黑名单（取消则移除）</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <button onclick="callMiniBtcFunction('setBlacklist')" class="btn-custom w-100">执行</button>
+                            </div>
+                            <div class="col-md-2">
+                                <button onclick="readMiniBtcConfig('blacklist')" class="btn-read w-100">读取状态</button>
+                            </div>
+                        </div>
+                        <div id="blacklistStatusMsg" class="status"></div>
+                    </div>
+                </div>
+
+                <!-- 4. 买币开关管理 -->
+                <div class="row mb-4 border-bottom pb-3">
+                    <div class="col-12">
+                        <h6>4. 全局买币开关</h6>
+                        <div class="row align-items-end">
+                            <div class="col-md-4">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="buyEnabledSwitch">
+                                    <label class="form-check-label" for="buyEnabledSwitch">基础买币开关 (buyEnabled)</label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="buysAllowedSwitch">
+                                    <label class="form-check-label" for="buysAllowedSwitch">全局买入允许 (buysAllowed)</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <button onclick="callMiniBtcFunction('setBuySwitch')" class="btn-custom w-100">保存开关</button>
+                            </div>
+                            <div class="col-md-2">
+                                <button onclick="readMiniBtcConfig('buySwitch')" class="btn-read w-100">读取当前开关</button>
+                            </div>
+                        </div>
+                        <div id="buySwitchStatusMsg" class="status"></div>
+                    </div>
+                </div>
+
+                <!-- 5. 交易开关（启用/禁用Trading） -->
+                <div class="row mb-4 border-bottom pb-3">
+                    <div class="col-12">
+                        <h6>5. 交易总开关（启用/禁用Trading）</h6>
+                        <div class="row align-items-end">
+                            <div class="col-md-6">
+                                <div class="alert alert-warning">
+                                    <strong>注意：</strong>启用交易后会记录 launchBlock，开启 Anti-snipe 保护；禁用交易需谨慎！
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <button onclick="callMiniBtcFunction('enableTrading')" class="btn-custom w-100">启用交易</button>
+                            </div>
+                            <div class="col-md-3">
+                                <button onclick="callMiniBtcFunction('disableTrading')" class="btn-custom w-100 bg-danger">禁用交易</button>
+                            </div>
+                        </div>
+                        <div id="tradingSwitchStatusMsg" class="status"></div>
+                    </div>
+                </div>
+
+                <!-- 6. Anti-snipe 参数快速配置 -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <h6>6. Anti-snipe 参数配置</h6>
+                        <div class="row mb-2">
+                            <div class="col-md-2">
+                                <label class="form-label">防抢购区块数</label>
+                                <input type="number" id="antiSnipeBlocks" class="form-control" value="3" min="0">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">单笔最大买入</label>
+                                <input type="number" id="maxBuyAmount" class="form-control" value="0" min="0" placeholder="0=无限制">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">钱包持币上限</label>
+                                <input type="number" id="maxWalletAmount" class="form-control" value="0" min="0" placeholder="0=无限制">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">冷却区块数</label>
+                                <input type="number" id="cooldownBlocks" class="form-control" value="1" min="0">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">&nbsp;</label>
+                                <button onclick="callMiniBtcFunction('setAntiSnipeParams')" class="btn-custom w-100">保存参数</button>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">&nbsp;</label>
+                                <button onclick="readMiniBtcConfig('antiSnipeParams')" class="btn-read w-100">读取参数</button>
+                            </div>
+                        </div>
+                        <div id="antiSnipeParamsStatusMsg" class="status"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 核心交互脚本 -->
+    <script>
+        // 全局变量
+        let provider, signer, walletAddress;
+
+        // MiniBTC 核心 ABI（仅包含权限管理相关函数）
+        const miniBtcABI = [
+            // 读取函数
+            "function buyWhitelist(address) view returns (bool)",
+            "function trustedContracts(address) view returns (bool)",
+            "function blacklist(address) view returns (bool)",
+            "function buyEnabled() view returns (bool)",
+            "function buysAllowed() view returns (bool)",
+            "function tradingEnabled() view returns (bool)",
+            "function launchBlock() view returns (uint256)",
+            "function antiSnipeBlocks() view returns (uint256)",
+            "function maxBuyAmount() view returns (uint256)",
+            "function maxWalletAmount() view returns (uint256)",
+            "function cooldownBlocks() view returns (uint256)",
+            
+            // 写入函数
+            "function setBuyWhitelist(address account, bool allowed) external",
+            "function setTrustedContract(address account, bool trusted) external",
+            "function setBlacklist(address account, bool flagged) external",
+            "function setBuyEnabled(bool enabled) external",
+            "function setBuysAllowed(bool allowed) external",
+            "function enableTrading() external",
+            "function disableTrading() external",
+            "function setAntiSnipeParams(uint256 antiBlocks, uint256 maxBuy, uint256 maxWallet, uint256 _cooldownBlocks) external"
+        ];
+
+        // ========== 钱包连接逻辑（与原有面板保持一致） ==========
+        window.addEventListener('DOMContentLoaded', async () => {
+            if (window.ethereum) {
+                try {
+                    const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                    if (accounts.length > 0) {
+                        initWallet(accounts[0]);
+                    }
+                } catch (err) {
+                    console.log('检查钱包状态失败:', err);
+                }
+
+                window.ethereum.on('accountsChanged', (accounts) => {
+                    if (accounts.length > 0) {
+                        initWallet(accounts[0]);
+                    } else {
+                        resetWalletStatus();
+                    }
+                });
+
+                window.ethereum.on('chainChanged', (chainId) => {
+                    window.location.reload();
+                });
+            }
+        });
+
+        async function initWallet(addr) {
+            walletAddress = addr;
+            provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
+            await provider.send('eth_requestAccounts', []);
+            signer = provider.getSigner();
+            
+            document.getElementById('walletStatus').textContent = `已连接: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}`;
+            document.getElementById('walletStatus').style.color = '#198754';
+            document.getElementById('connectWallet').textContent = '切换钱包';
+
+            // 连接钱包后自动读取一次核心开关状态
+            readMiniBtcConfig('buySwitch');
+        }
+
+        function resetWalletStatus() {
+            walletAddress = null;
+            provider = null;
+            signer = null;
+            document.getElementById('walletStatus').textContent = '未连接钱包';
+            document.getElementById('walletStatus').style.color = '#6c757d';
+            document.getElementById('connectWallet').textContent = '连接钱包';
+        }
+
+        document.getElementById('connectWallet').addEventListener('click', async () => {
+            if (!window.ethereum) {
+                alert('请安装MetaMask钱包（或其他EVM兼容钱包）！');
+                return;
+            }
+
+            try {
+                const accounts = await window.ethereum.request({ 
+                    method: 'eth_requestAccounts'
+                });
+
+                if (accounts.length === 0) {
+                    throw new Error('未授权任何账户');
+                }
+
+                initWallet(accounts[0]);
+            } catch (error) {
+                document.getElementById('walletStatus').textContent = `连接失败: ${error.message}`;
+                document.getElementById('walletStatus').style.color = '#dc3545';
+                console.error('钱包连接错误:', error);
+            }
+        });
+
+        // 切换链逻辑
+        document.getElementById('chainSelector').addEventListener('change', async (e) => {
+            if (!window.ethereum) {
+                alert('请安装MetaMask钱包！');
+                return;
+            }
+
+            const chainId = e.target.value;
+            const hexChainId = ethers.utils.hexValue(parseInt(chainId));
+
+            try {
+                await window.ethereum.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: hexChainId }],
+                });
+            } catch (switchError) {
+                if (switchError.code === 4902) {
+                    alert(`当前钱包未添加该链，请手动添加链ID ${chainId} 后重试！`);
+                } else {
+                    alert(`切换链失败: ${switchError.message}`);
+                }
+            }
+        });
+
+        // 解锁/锁定输入框
+        function unlockInput(id) {
+            const input = document.getElementById(id);
+            if (input.readOnly) {
+                input.readOnly = false;
+                input.style.backgroundColor = '#fff';
+                input.style.cursor = 'text';
+                const unlockBtn = input.parentElement.querySelector('.btn-unlock');
+                unlockBtn.textContent = '🔒 锁定';
+                unlockBtn.onclick = () => lockInput(id);
+            }
+        }
+
+        function lockInput(id) {
+            const input = document.getElementById(id);
+            input.readOnly = true;
+            input.style.backgroundColor = '#f8f9fa';
+            input.style.cursor = 'not-allowed';
+            const unlockBtn = input.parentElement.querySelector('.btn-unlock');
+            unlockBtn.textContent = '🔓 解锁';
+            unlockBtn.onclick = () => unlockInput(id);
+        }
+
+        // 折叠/展开面板
+        function toggleCollapse(id) {
+            const content = document.getElementById(id);
+            const btn = content.parentElement.querySelector('.collapse-btn');
+            if (content.style.display === 'none') {
+                content.style.display = 'block';
+                btn.textContent = '收起 ▲';
+            } else {
+                content.style.display = 'none';
+                btn.textContent = '展开 ▼';
+            }
+        }
+
+        // ========== 读取MiniBTC配置函数 ==========
+        async function readMiniBtcConfig(configKey) {
+            if (!provider) return alert('请先连接钱包！');
+            const contractAddr = document.getElementById('miniBtcAddr').value;
+            if (!ethers.utils.isAddress(contractAddr)) return alert('MiniBTC合约地址无效！');
+            
+            const contract = new ethers.Contract(contractAddr, miniBtcABI, provider);
+            let statusEl;
+
+            try {
+                // 根据不同配置项获取对应的状态元素
+                switch(configKey) {
+                    case 'buyWhitelist':
+                        statusEl = document.getElementById('buyWhitelistStatusMsg');
+                        const buyWhitelistAddr = document.getElementById('buyWhitelistAddr').value;
+                        if (!ethers.utils.isAddress(buyWhitelistAddr)) throw new Error('地址格式无效');
+                        statusEl.className = 'status loading';
+                        statusEl.textContent = '正在读取白名单状态...';
+                        const isInBuyWhitelist = await contract.buyWhitelist(buyWhitelistAddr);
+                        document.getElementById('buyWhitelistStatus').checked = isInBuyWhitelist;
+                        statusEl.className = 'status success';
+                        statusEl.textContent = `读取成功：该地址${isInBuyWhitelist ? '在' : '不在'}买币白名单中`;
+                        break;
+
+                    case 'trustedContract':
+                        statusEl = document.getElementById('trustedContractStatusMsg');
+                        const trustedAddr = document.getElementById('trustedContractAddr').value;
+                        if (!ethers.utils.isAddress(trustedAddr)) throw new Error('地址格式无效');
+                        statusEl.className = 'status loading';
+                        statusEl.textContent = '正在读取受信任合约状态...';
+                        const isTrusted = await contract.trustedContracts(trustedAddr);
+                        document.getElementById('trustedContractStatus').checked = isTrusted;
+                        statusEl.className = 'status success';
+                        statusEl.textContent = `读取成功：该地址${isTrusted ? '是' : '不是'}受信任合约`;
+                        break;
+
+                    case 'blacklist':
+                        statusEl = document.getElementById('blacklistStatusMsg');
+                        const blacklistAddr = document.getElementById('blacklistAddr').value;
+                        if (!ethers.utils.isAddress(blacklistAddr)) throw new Error('地址格式无效');
+                        statusEl.className = 'status loading';
+                        statusEl.textContent = '正在读取黑名单状态...';
+                        const isBlacklisted = await contract.blacklist(blacklistAddr);
+                        document.getElementById('blacklistStatus').checked = isBlacklisted;
+                        statusEl.className = 'status success';
+                        statusEl.textContent = `读取成功：该地址${isBlacklisted ? '在' : '不在'}黑名单中`;
+                        break;
+
+                    case 'buySwitch':
+                        statusEl = document.getElementById('buySwitchStatusMsg');
+                        statusEl.className = 'status loading';
+                        statusEl.textContent = '正在读取买币开关状态...';
+                        const buyEnabled = await contract.buyEnabled();
+                        const buysAllowed = await contract.buysAllowed();
+                        document.getElementById('buyEnabledSwitch').checked = buyEnabled;
+                        document.getElementById('buysAllowedSwitch').checked = buysAllowed;
+                        statusEl.className = 'status success';
+                        statusEl.textContent = `读取成功：基础买币开关=${buyEnabled}，全局买入允许=${buysAllowed}`;
+                        break;
+
+                    case 'antiSnipeParams':
+                        statusEl = document.getElementById('antiSnipeParamsStatusMsg');
+                        statusEl.className = 'status loading';
+                        statusEl.textContent = '正在读取Anti-snipe参数...';
+                        const antiBlocks = await contract.antiSnipeBlocks();
+                        const maxBuy = await contract.maxBuyAmount();
+                        const maxWallet = await contract.maxWalletAmount();
+                        const cooldown = await contract.cooldownBlocks();
+                        document.getElementById('antiSnipeBlocks').value = antiBlocks.toString();
+                        document.getElementById('maxBuyAmount').value = maxBuy.toString();
+                        document.getElementById('maxWalletAmount').value = maxWallet.toString();
+                        document.getElementById('cooldownBlocks').value = cooldown.toString();
+                        statusEl.className = 'status success';
+                        statusEl.textContent = '读取成功：已填充当前Anti-snipe参数';
+                        break;
+
+                    default:
+                        throw new Error('无效的配置项');
+                }
+            } catch (error) {
+                statusEl = statusEl || document.getElementById('buyWhitelistStatusMsg');
+                statusEl.className = 'status error';
+                statusEl.textContent = `读取失败: ${error.message}`;
+                console.error('读取配置错误:', error);
+            }
+        }
+
+        // ========== 执行MiniBTC写函数 ==========
+        async function callMiniBtcFunction(funcName) {
+            if (!provider || !signer) return alert('请先连接钱包！');
+            const contractAddr = document.getElementById('miniBtcAddr').value;
+            if (!ethers.utils.isAddress(contractAddr)) return alert('MiniBTC合约地址无效！');
+            
+            const contract = new ethers.Contract(contractAddr, miniBtcABI, signer);
+            let statusEl, tx;
+
+            try {
+                // 根据不同函数名执行对应的操作
+                switch(funcName) {
+                    case 'setBuyWhitelist':
+                        statusEl = document.getElementById('buyWhitelistStatusMsg');
+                        const buyWhitelistAddr = document.getElementById('buyWhitelistAddr').value;
+                        const isAddBuyWhitelist = document.getElementById('buyWhitelistStatus').checked;
+                        if (!ethers.utils.isAddress(buyWhitelistAddr)) throw new Error('地址格式无效');
+                        
+                        statusEl.className = 'status loading';
+                        statusEl.textContent = '交易处理中，请等待...';
+                        tx = await contract.setBuyWhitelist(buyWhitelistAddr, isAddBuyWhitelist);
+                        break;
+
+                    case 'setTrustedContract':
+                        statusEl = document.getElementById('trustedContractStatusMsg');
+                        const trustedAddr = document.getElementById('trustedContractAddr').value;
+                        const isTrusted = document.getElementById('trustedContractStatus').checked;
+                        if (!ethers.utils.isAddress(trustedAddr)) throw new Error('地址格式无效');
+                        
+                        statusEl.className = 'status loading';
+                        statusEl.textContent = '交易处理中，请等待...';
+                        tx = await contract.setTrustedContract(trustedAddr, isTrusted);
+                        break;
+
+                    case 'setBlacklist':
+                        statusEl = document.getElementById('blacklistStatusMsg');
+                        const blacklistAddr = document.getElementById('blacklistAddr').value;
+                        const isAddBlacklist = document.getElementById('blacklistStatus').checked;
+                        if (!ethers.utils.isAddress(blacklistAddr)) throw new Error('地址格式无效');
+                        
+                        statusEl.className = 'status loading';
+                        statusEl.textContent = '交易处理中，请等待...';
+                        tx = await contract.setBlacklist(blacklistAddr, isAddBlacklist);
+                        break;
+
+                    case 'setBuySwitch':
+                        statusEl = document.getElementById('buySwitchStatusMsg');
+                        const buyEnabled = document.getElementById('buyEnabledSwitch').checked;
+                        const buysAllowed = document.getElementById('buysAllowedSwitch').checked;
+                        
+                        statusEl.className = 'status loading';
+                        statusEl.textContent = '交易处理中，请等待...';
+                        // 先设置buyEnabled，再设置buysAllowed
+                        await contract.setBuyEnabled(buyEnabled);
+                        tx = await contract.setBuysAllowed(buysAllowed);
+                        break;
+
+                    case 'enableTrading':
+                        statusEl = document.getElementById('tradingSwitchStatusMsg');
+                        statusEl.className = 'status loading';
+                        statusEl.textContent = '启用交易中，请等待...';
+                        tx = await contract.enableTrading();
+                        break;
+
+                    case 'disableTrading':
+                        statusEl = document.getElementById('tradingSwitchStatusMsg');
+                        statusEl.className = 'status loading';
+                        statusEl.textContent = '禁用交易中，请等待...';
+                        tx = await contract.disableTrading();
+                        break;
+
+                    case 'setAntiSnipeParams':
+                        statusEl = document.getElementById('antiSnipeParamsStatusMsg');
+                        const antiBlocks = document.getElementById('antiSnipeBlocks').value;
+                        const maxBuy = document.getElementById('maxBuyAmount').value;
+                        const maxWallet = document.getElementById('maxWalletAmount').value;
+                        const cooldown = document.getElementById('cooldownBlocks').value;
+                        
+                        if (antiBlocks < 0 || maxBuy < 0 || maxWallet < 0 || cooldown < 0) {
+                            throw new Error('参数不能为负数');
+                        }
+                        
+                        statusEl.className = 'status loading';
+                        statusEl.textContent = '保存参数中，请等待...';
+                        tx = await contract.setAntiSnipeParams(
+                            ethers.BigNumber.from(antiBlocks),
+                            ethers.BigNumber.from(maxBuy),
+                            ethers.BigNumber.from(maxWallet),
+                            ethers.BigNumber.from(cooldown)
+                        );
+                        break;
+
+                    default:
+                        throw new Error(`不支持的函数: ${funcName}`);
+                }
+
+                // 等待交易上链
+                if (tx) await tx.wait();
+                
+                // 更新状态提示
+                statusEl.className = 'status success';
+                statusEl.textContent = `操作成功！交易哈希: ${tx ? tx.hash.substring(0, 10) + '...' : '操作完成'}`;
+                
+                // 操作成功后自动重新读取对应配置
+                const configKeyMap = {
+                    'setBuyWhitelist': 'buyWhitelist',
+                    'setTrustedContract': 'trustedContract',
+                    'setBlacklist': 'blacklist',
+                    'setBuySwitch': 'buySwitch',
+                    'enableTrading': 'buySwitch',
+                    'disableTrading': 'buySwitch',
+                    'setAntiSnipeParams': 'antiSnipeParams'
+                };
+                if (configKeyMap[funcName]) {
+                    setTimeout(() => readMiniBtcConfig(configKeyMap[funcName]), 1000);
+                }
+
+            } catch (error) {
+                statusEl = statusEl || document.getElementById('buyWhitelistStatusMsg');
+                let errorMsg = error.message;
+                
+                // 简化常见错误提示
+                if (errorMsg.includes('only owner')) {
+                    errorMsg = '执行失败：仅合约拥有者可调用该函数';
+                } else if (errorMsg.includes('invalid address')) {
+                    errorMsg = '执行失败：无效的地址格式';
+                } else if (errorMsg.length > 100) {
+                    errorMsg = errorMsg.substring(0, 100) + '...';
+                }
+                
+                statusEl.className = 'status error';
+                statusEl.textContent = `执行失败: ${errorMsg}`;
+                console.error('执行函数错误:', error);
+            }
+        }
+
+        // 页面初始化：默认展开所有面板
+        window.onload = function() {
+            document.querySelectorAll('.collapse-content').forEach(el => {
+                el.style.display = 'block';
+            });
+            document.querySelectorAll('.collapse-btn').forEach(btn => {
+                btn.textContent = '收起 ▲';
+            });
+        };
+    </script>
+</body>
+</html>
